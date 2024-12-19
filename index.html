@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Voice Picking Assistant</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="manifest" href="manifest.json">
+    <style>
+        * {
+            box-sizing: border-box;
+            touch-action: manipulation;
+        }
+        html, body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            height: 100%;
+            overscroll-behavior-y: contain;
+        }
+        body {
+            display: flex;
+            flex-direction: column;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 15px;
+            background-color: #f4f4f4;
+        }
+        #app-container {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        #fileInput {
+            display: none;
+        }
+        #file-selector {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 5px;
+            width: 100%;
+        }
+        #controls {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        .control-button {
+            flex-grow: 1;
+            padding: 15px;
+            font-size: 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        .control-button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #currentItem {
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            text-align: center;
+            font-size: 18px;
+            min-height: 200px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        #settingsPanel {
+            background-color: white;
+            border-radius: 5px;
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        #voiceRecognitionStatus {
+            text-align: center;
+            font-weight: bold;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        #speechRate {
+            width: 100%;
+        }
+        @media (max-width: 360px) {
+            body {
+                padding: 10px;
+            }
+            .control-button {
+                padding: 12px;
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="app-container">
+        <h1 style="text-align: center; margin-bottom: 0;">Voice Picking</h1>
+        
+        <div id="settingsPanel">
+            <label for="speechRate">Speech Rate: <span id="speechRateValue">0.9</span></label>
+            <input type="range" id="speechRate" min="0.5" max="2" step="0.1" value="0.9">
+            
+            <div id="voiceRecognitionStatus">Voice Recognition: Not Supported</div>
+            <button id="toggleVoiceRecognition" disabled>Enable Voice Control</button>
+        </div>
+        
+        <input type="file" id="fileInput" accept=".xlsx, .xls, .csv">
+        <button id="file-selector" onclick="document.getElementById('fileInput').click()">
+            Select Order File
+        </button>
+        
+        <div id="currentItem">Select a file to begin...</div>
+        
+        <div id="controls">
+            <button id="previousButton" class="control-button">Previous</button>
+            <button id="repeatButton" class="control-button">Repeat</button>
+            <button id="nextButton" class="control-button">Next</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script>
+        // Polyfill for cross-browser voice recognition support
+        window.SpeechRecognition = window.SpeechRecognition || 
+                                   window.webkitSpeechRecognition || 
+                                   window.mozSpeechRecognition || 
+                                   window.msSpeechRecognition;
+
+        let orders = [];
+        let currentItemIndex = 0;
+        let synthesis = window.speechSynthesis;
+        let recognition = null;
+        let isVoiceRecognitionActive = false;
+
+        // Speech Rate Adjustment
+        document.getElementById('speechRate').addEventListener('input', function(e) {
+            document.getElementById('speechRateValue').textContent = e.target.value;
+        });
+
+        // Check for Speech Recognition Support with improved detection
+        function checkVoiceRecognitionSupport() {
+            const toggleButton = document.getElementById('toggleVoiceRecognition');
+            const statusElement = document.getElementById('voiceRecognitionStatus');
+
+            if (window.SpeechRecognition) {
+                toggleButton.disabled = false;
+                statusElement.textContent = 'Voice Recognition: Ready';
+                return window.SpeechRecognition;
+            } else {
+                statusElement.textContent = 'Voice Recognition: Not Supported';
+                toggleButton.disabled = true;
+                return null;
+            }
+        }
+
+        // Initialize on page load
+        const SpeechRecognition = checkVoiceRecognitionSupport();
+
+        // Setup Voice Recognition with more robust error handling
+        function setupVoiceRecognition() {
+            if (!SpeechRecognition) return null;
+
+            // Stop any existing recognition
+            if (recognition) {
+                try {
+                    recognition.stop();
+                } catch (error) {
+                    console.log('Error stopping previous recognition:', error);
+                }
+            }
+
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = () => {
+                isVoiceRecognitionActive = true;
+                document.getElementById('voiceRecognitionStatus').textContent = 'Listening...';
+                document.getElementById('toggleVoiceRecognition').textContent = 'Stop Listening';
+            };
+
+            recognition.onresult = (event) => {
+                // Handle results more defensively
+                if (event.results && event.results.length > 0) {
+                    const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase().trim();
+                    processVoiceCommand(transcript);
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.error('Voice recognition error:', event.error);
+                
+                // More comprehensive error handling
+                let errorMessage = 'Unknown error';
+                switch(event.error) {
+                    case 'no-speech':
+                        errorMessage = 'No speech detected';
+                        break;
+                    case 'audio-capture':
+                        errorMessage = 'Audio capture failed';
+                        break;
+                    case 'not-allowed':
+                        errorMessage = 'Voice recognition not allowed. Check browser permissions.';
+                        break;
+                }
+
+                // Reset recognition state
+                isVoiceRecognitionActive = false;
+                document.getElementById('voiceRecognitionStatus').textContent = `Voice Recognition: ${errorMessage}`;
+                document.getElementById('toggleVoiceRecognition').textContent = 'Start Listening';
+                
+                // Attempt to restart if it was supposed to be active
+                if (document.getElementById('toggleVoiceRecognition').textContent === 'Stop Listening') {
+                    setTimeout(() => {
+                        try {
+                            recognition.start();
+                        } catch (restartError) {
+                            console.error('Failed to restart recognition:', restartError);
+                        }
+                    }, 100);
+                }
+            };
+
+            recognition.onend = () => {
+                isVoiceRecognitionActive = false;
+                document.getElementById('voiceRecognitionStatus').textContent = 'Voice Recognition: Ready';
+                document.getElementById('toggleVoiceRecognition').textContent = 'Start Listening';
+            };
+
+            return recognition;
+        }
+
+        // Toggle Voice Recognition
+        document.getElementById('toggleVoiceRecognition').addEventListener('click', () => {
+            // If recognition is not set up, set it up
+            if (!recognition) {
+                recognition = setupVoiceRecognition();
+            }
+
+            if (recognition) {
+                try {
+                    // If currently active, stop
+                    if (isVoiceRecognitionActive) {
+                        recognition.stop();
+                    } 
+                    // If not active, start
+                    else {
+                        // Ensure any existing recognition is stopped first
+                        try {
+                            recognition.abort();
+                        } catch (abortError) {
+                            console.log('Error aborting previous recognition:', abortError);
+                        }
+                        
+                        // Start new recognition with error fallback
+                        recognition.start();
+                    }
+                } catch (error) {
+                    console.error('Voice recognition toggle error:', error);
+                    alert('Voice recognition error: ' + error.message);
+                }
+            }
+        });
+
+        // Handle file upload
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            let file = e.target.files[0];
+            
+            if (!file) return;
+
+            const allowedTypes = [
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'application/vnd.ms-excel', 
+                'text/csv'
+            ];
+            
+            if (!allowedTypes.includes(file.type)) {
+                alert('Invalid file type. Please upload an Excel or CSV file.');
+                return;
+            }
+
+            let reader = new FileReader();
+            
+            reader.onload = function(e) {
+                try {
+                    let data = new Uint8Array(e.target.result);
+                    let workbook = XLSX.read(data, {type: 'array'});
+                    
+                    let firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                    
+                    orders = XLSX.utils.sheet_to_json(firstSheet, {header: 1});
+                    
+                    // Remove header row if it exists
+                    if (orders.length > 0 && typeof orders[0][0] === 'string') {
+                        orders.shift();
+                    }
+                    
+                    if (orders.length > 0) {
+                        currentItemIndex = 0;
+                        displayCurrentItem();
+                        updateButtonStates();
+                    } else {
+                        alert('No data found in the file');
+                    }
+                } catch (error) {
+                    alert('Error processing file: ' + error.message);
+                }
+            };
+            
+            reader.readAsArrayBuffer(file);
+        });
+
+        // Speech synthesis function
+        function speak(text) {
+            const speechRate = parseFloat(document.getElementById('speechRate').value);
+            synthesis.cancel();
+            let utterance = new SpeechSynthesisUtterance(text);
+            utterance.rate = speechRate;
+            synthesis.speak(utterance);
+        }
+        
+        // Display current item
+        function displayCurrentItem() {
+            if (orders.length === 0) return;
+            
+            let item = orders[currentItemIndex];
+            let customer = item[0] || 'Unknown';
+            let itemName = item[1] || 'No Item';
+            let quantity = item[2] || '0';
+            let unit = item[3] || '';
+            
+            let displayText = `Customer: ${customer}<br>
+                             Item: ${itemName}<br>
+                             Quantity: ${quantity} ${unit}`;
+            
+            document.getElementById('currentItem').innerHTML = displayText;
+            
+            // Always speak the current item details
+            speak(`${itemName}, ${quantity} ${unit}`);
+        }
+        
+        function updateButtonStates() {
+            document.getElementById('previousButton').disabled = currentItemIndex === 0;
+            document.getElementById('nextButton').disabled = currentItemIndex === orders.length - 1;
+        }
+        
+        // Process Voice Commands
+        function processVoiceCommand(transcript) {
+            const cleanedTranscript = transcript.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '').trim().toLowerCase();
+            
+            const commands = {
+                'next': () => document.getElementById('nextButton').click(),
+                'previous': () => document.getElementById('previousButton').click(),
+                'repeat': () => document.getElementById('repeatButton').click()
+            };
+
+            const matchedCommand = Object.keys(commands).find(cmd => 
+                cleanedTranscript.includes(cmd)
+            );
+
+            if (matchedCommand) {
+                commands[matchedCommand]();
+            }
+        }
+        
+        // Button controls
+        document.getElementById('repeatButton').addEventListener('click', () => {
+            if (orders.length > 0) displayCurrentItem();
+        });
+        
+        document.getElementById('previousButton').addEventListener('click', () => {
+            if (currentItemIndex > 0) {
+                currentItemIndex--;
+                displayCurrentItem();
+                updateButtonStates();
+            }
+        });
+        
+        document.getElementById('nextButton').addEventListener('click', () => {
+            if (currentItemIndex < orders.length - 1) {
+                currentItemIndex++;
+                displayCurrentItem();
+                updateButtonStates();
+            } else {
+                speak('All orders completed');
+            }
+        });
+    </script>
+</body>
+</html>
