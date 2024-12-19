@@ -1,13 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
-<!-- Previous head section remains the same -->
 <head>
     <meta charset="UTF-8">
     <title>Voice Picking Assistant</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <link rel="manifest" href="manifest.json">
     <style>
-        /* Previous styles remain the same */
         * {
             box-sizing: border-box;
             touch-action: manipulation;
@@ -101,6 +99,12 @@
         #speechRate {
             width: 100%;
         }
+        #currentFileName {
+            text-align: center;
+            font-style: italic;
+            color: #666;
+            margin: 5px 0;
+        }
         @media (max-width: 360px) {
             body {
                 padding: 10px;
@@ -113,7 +117,6 @@
     </style>
 </head>
 <body>
-    <!-- Previous body content remains the same -->
     <div id="app-container">
         <h1 style="text-align: center; margin-bottom: 0;">Voice Picking</h1>
         
@@ -129,6 +132,7 @@
         <button id="file-selector" onclick="document.getElementById('fileInput').click()">
             Select Order File
         </button>
+        <div id="currentFileName">No file loaded</div>
         
         <div id="currentItem">Select a file to begin...</div>
         
@@ -141,7 +145,6 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script>
-        // Previous code remains the same until setupVoiceRecognition
         window.SpeechRecognition = window.SpeechRecognition || 
                                    window.webkitSpeechRecognition || 
                                    window.mozSpeechRecognition || 
@@ -153,10 +156,49 @@
         let recognition = null;
         let isVoiceRecognitionActive = false;
         let autoRestartRecognition = false;
+        let currentFileName = '';
+
+        // Load saved state
+        function loadSavedState() {
+            const savedState = localStorage.getItem('voicePickingState');
+            if (savedState) {
+                const state = JSON.parse(savedState);
+                currentItemIndex = state.currentItemIndex || 0;
+                orders = state.orders || [];
+                currentFileName = state.currentFileName || '';
+                
+                if (orders.length > 0) {
+                    displayCurrentItem();
+                    updateButtonStates();
+                    document.getElementById('currentFileName').textContent = `Current file: ${currentFileName}`;
+                }
+            }
+        }
+
+        // Save current state
+        function saveState() {
+            const state = {
+                orders,
+                currentItemIndex,
+                currentFileName
+            };
+            localStorage.setItem('voicePickingState', JSON.stringify(state));
+        }
+
+        // Load saved state on startup
+        loadSavedState();
 
         document.getElementById('speechRate').addEventListener('input', function(e) {
             document.getElementById('speechRateValue').textContent = e.target.value;
+            localStorage.setItem('speechRate', e.target.value);
         });
+
+        // Load saved speech rate
+        const savedSpeechRate = localStorage.getItem('speechRate');
+        if (savedSpeechRate) {
+            document.getElementById('speechRate').value = savedSpeechRate;
+            document.getElementById('speechRateValue').textContent = savedSpeechRate;
+        }
 
         function checkVoiceRecognitionSupport() {
             const toggleButton = document.getElementById('toggleVoiceRecognition');
@@ -273,7 +315,6 @@
             }
         });
 
-        // Rest of the code remains the same
         document.getElementById('fileInput').addEventListener('change', function(e) {
             let file = e.target.files[0];
             
@@ -289,6 +330,9 @@
                 alert('Invalid file type. Please upload an Excel or CSV file.');
                 return;
             }
+
+            currentFileName = file.name;
+            document.getElementById('currentFileName').textContent = `Current file: ${currentFileName}`;
 
             let reader = new FileReader();
             
@@ -309,6 +353,7 @@
                         currentItemIndex = 0;
                         displayCurrentItem();
                         updateButtonStates();
+                        saveState();
                     } else {
                         alert('No data found in the file');
                     }
@@ -343,6 +388,7 @@
             
             document.getElementById('currentItem').innerHTML = displayText;
             speak(`${itemName}, ${quantity} ${unit}`);
+            saveState();
         }
         
         function updateButtonStates() {
