@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-<!-- Previous head section remains the same until the style section -->
+<!-- Previous head section remains the same -->
 <head>
     <meta charset="UTF-8">
     <title>Voice Picking Assistant</title>
@@ -8,17 +8,6 @@
     <link rel="manifest" href="manifest.json">
     <style>
         /* Previous styles remain the same */
-        /* Add new styles for filename display */
-        #filename-display {
-            background-color: white;
-            border-radius: 5px;
-            padding: 10px;
-            margin-top: 5px;
-            text-align: center;
-            font-size: 14px;
-            color: #666;
-        }
-        /* Rest of previous styles */
         * {
             box-sizing: border-box;
             touch-action: manipulation;
@@ -124,6 +113,7 @@
     </style>
 </head>
 <body>
+    <!-- Previous body content remains the same -->
     <div id="app-container">
         <h1 style="text-align: center; margin-bottom: 0;">Voice Picking</h1>
         
@@ -139,7 +129,6 @@
         <button id="file-selector" onclick="document.getElementById('fileInput').click()">
             Select Order File
         </button>
-        <div id="filename-display">No file selected</div>
         
         <div id="currentItem">Select a file to begin...</div>
         
@@ -152,7 +141,7 @@
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script>
-        // Previous voice recognition related code remains the same
+        // Previous code remains the same until setupVoiceRecognition
         window.SpeechRecognition = window.SpeechRecognition || 
                                    window.webkitSpeechRecognition || 
                                    window.mozSpeechRecognition || 
@@ -165,53 +154,10 @@
         let isVoiceRecognitionActive = false;
         let autoRestartRecognition = false;
 
-        // Load saved data on page load
-        window.addEventListener('load', () => {
-            loadSavedData();
-            const savedSpeechRate = localStorage.getItem('speechRate');
-            if (savedSpeechRate) {
-                document.getElementById('speechRate').value = savedSpeechRate;
-                document.getElementById('speechRateValue').textContent = savedSpeechRate;
-            }
-        });
-
-        // Save speech rate when changed
         document.getElementById('speechRate').addEventListener('input', function(e) {
             document.getElementById('speechRateValue').textContent = e.target.value;
-            localStorage.setItem('speechRate', e.target.value);
         });
 
-        // Function to save current state
-        function saveCurrentState() {
-            const state = {
-                orders: orders,
-                currentItemIndex: currentItemIndex,
-                filename: document.getElementById('filename-display').textContent
-            };
-            localStorage.setItem('voicePickingState', JSON.stringify(state));
-        }
-
-        // Function to load saved data
-        function loadSavedData() {
-            try {
-                const savedState = localStorage.getItem('voicePickingState');
-                if (savedState) {
-                    const state = JSON.parse(savedState);
-                    orders = state.orders;
-                    currentItemIndex = state.currentItemIndex;
-                    document.getElementById('filename-display').textContent = state.filename;
-                    
-                    if (orders.length > 0) {
-                        displayCurrentItem();
-                        updateButtonStates();
-                    }
-                }
-            } catch (error) {
-                console.error('Error loading saved data:', error);
-            }
-        }
-
-        // Rest of the voice recognition code remains the same
         function checkVoiceRecognitionSupport() {
             const toggleButton = document.getElementById('toggleVoiceRecognition');
             const statusElement = document.getElementById('voiceRecognitionStatus');
@@ -229,7 +175,105 @@
 
         const SpeechRecognition = checkVoiceRecognitionSupport();
 
-        // Modified file input handler to include filename display and state saving
+        function setupVoiceRecognition() {
+            if (!SpeechRecognition) return null;
+
+            if (recognition) {
+                try {
+                    recognition.stop();
+                } catch (error) {
+                    console.log('Error stopping previous recognition:', error);
+                }
+            }
+
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = () => {
+                isVoiceRecognitionActive = true;
+                document.getElementById('voiceRecognitionStatus').textContent = 'Listening...';
+                document.getElementById('toggleVoiceRecognition').textContent = 'Stop Listening';
+            };
+
+            recognition.onresult = (event) => {
+                if (event.results && event.results.length > 0) {
+                    const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase().trim();
+                    processVoiceCommand(transcript);
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.error('Voice recognition error:', event.error);
+                
+                let errorMessage = 'Unknown error';
+                switch(event.error) {
+                    case 'no-speech':
+                        errorMessage = 'No speech detected';
+                        break;
+                    case 'audio-capture':
+                        errorMessage = 'Audio capture failed';
+                        break;
+                    case 'not-allowed':
+                        errorMessage = 'Voice recognition not allowed. Check browser permissions.';
+                        break;
+                }
+
+                document.getElementById('voiceRecognitionStatus').textContent = `Voice Recognition: ${errorMessage}`;
+                
+                if (autoRestartRecognition && event.error === 'no-speech') {
+                    restartRecognition();
+                }
+            };
+
+            recognition.onend = () => {
+                if (autoRestartRecognition) {
+                    restartRecognition();
+                } else {
+                    isVoiceRecognitionActive = false;
+                    document.getElementById('voiceRecognitionStatus').textContent = 'Voice Recognition: Ready';
+                    document.getElementById('toggleVoiceRecognition').textContent = 'Start Listening';
+                }
+            };
+
+            return recognition;
+        }
+
+        function restartRecognition() {
+            setTimeout(() => {
+                try {
+                    if (recognition && autoRestartRecognition) {
+                        recognition.start();
+                    }
+                } catch (error) {
+                    console.error('Failed to restart recognition:', error);
+                }
+            }, 100);
+        }
+
+        document.getElementById('toggleVoiceRecognition').addEventListener('click', () => {
+            if (!recognition) {
+                recognition = setupVoiceRecognition();
+            }
+
+            if (recognition) {
+                try {
+                    if (isVoiceRecognitionActive) {
+                        autoRestartRecognition = false;
+                        recognition.stop();
+                    } else {
+                        autoRestartRecognition = true;
+                        recognition.start();
+                    }
+                } catch (error) {
+                    console.error('Voice recognition toggle error:', error);
+                    alert('Voice recognition error: ' + error.message);
+                }
+            }
+        });
+
+        // Rest of the code remains the same
         document.getElementById('fileInput').addEventListener('change', function(e) {
             let file = e.target.files[0];
             
@@ -245,9 +289,6 @@
                 alert('Invalid file type. Please upload an Excel or CSV file.');
                 return;
             }
-
-            // Update filename display
-            document.getElementById('filename-display').textContent = file.name;
 
             let reader = new FileReader();
             
@@ -268,8 +309,6 @@
                         currentItemIndex = 0;
                         displayCurrentItem();
                         updateButtonStates();
-                        // Save state after successful file load
-                        saveCurrentState();
                     } else {
                         alert('No data found in the file');
                     }
@@ -280,36 +319,6 @@
             
             reader.readAsArrayBuffer(file);
         });
-
-        // Modified navigation functions to include state saving
-        document.getElementById('previousButton').addEventListener('click', () => {
-            if (currentItemIndex > 0) {
-                currentItemIndex--;
-                displayCurrentItem();
-                updateButtonStates();
-                saveCurrentState();
-            }
-        });
-        
-        document.getElementById('nextButton').addEventListener('click', () => {
-            if (currentItemIndex < orders.length - 1) {
-                currentItemIndex++;
-                displayCurrentItem();
-                updateButtonStates();
-                saveCurrentState();
-            } else {
-                speak('All orders completed');
-            }
-        });
-
-        // Rest of the code remains the same
-        function setupVoiceRecognition() {
-            // ... (previous voice recognition setup code)
-        }
-
-        function restartRecognition() {
-            // ... (previous restart recognition code)
-        }
 
         function speak(text) {
             const speechRate = parseFloat(document.getElementById('speechRate').value);
@@ -361,6 +370,24 @@
         
         document.getElementById('repeatButton').addEventListener('click', () => {
             if (orders.length > 0) displayCurrentItem();
+        });
+        
+        document.getElementById('previousButton').addEventListener('click', () => {
+            if (currentItemIndex > 0) {
+                currentItemIndex--;
+                displayCurrentItem();
+                updateButtonStates();
+            }
+        });
+        
+        document.getElementById('nextButton').addEventListener('click', () => {
+            if (currentItemIndex < orders.length - 1) {
+                currentItemIndex++;
+                displayCurrentItem();
+                updateButtonStates();
+            } else {
+                speak('All orders completed');
+            }
         });
     </script>
 </body>
